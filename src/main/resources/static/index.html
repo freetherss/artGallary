@@ -9,12 +9,12 @@
 <body>
     <header>
         <h1>JIW Gallery</h1>
-        <nav>
+        <nav id="navbar">
             <ul>
-                <li><a href="#" id="create-post-btn">Upload</a></li>
-                <li><a href="#">Home</a></li>
-                <li><a href="#">About</a></li>
-                <li><a href="#">Contact</a></li>
+                <li><a href="/">Home</a></li>
+                <li id="new-post-link" style="display: none;"><a href="#">New Post</a></li>
+                <li id="login-link"><a href="/login.html">Login</a></li>
+                <li id="logout-link" style="display: none;"><a href="#">Logout</a></li>
             </ul>
         </nav>
     </header>
@@ -39,6 +39,8 @@
             <h2>새 게시물 / 게시물 수정</h2>
             <form id="postForm" enctype="multipart/form-data">
                 <input type="hidden" id="postId" name="id">
+                <input type="hidden" id="currentImagePathInput" name="currentImagePath">
+                <input type="hidden" id="currentImagePathInput" name="currentImagePath"> <!-- New hidden input -->
                 <div>
                     <label for="postTitle">제목:</label>
                     <input type="text" id="postTitle" name="title" required>

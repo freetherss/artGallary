@@ -1,9 +1,15 @@
 package com.example.test.service;
 
-import com.example.test.Post;
+import com.example.test.domain.Post;
+import com.example.test.domain.User;
+import com.example.test.dto.PostDto; // Import PostDto
+import com.example.test.dto.UserDto; // Import UserDto
 import com.example.test.repository.PostRepository;
+import com.example.test.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -16,6 +22,7 @@ import java.nio.file.Paths;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors; // Import Collectors
 
 @Service
 public class PostService {
@@ -24,10 +31,12 @@ public class PostService {
     private String uploadDir;
 
     private final PostRepository postRepository;
+    private final UserRepository userRepository;
 
     @Autowired
-    public PostService(PostRepository postRepository) {
+    public PostService(PostRepository postRepository, UserRepository userRepository) {
         this.postRepository = postRepository;
+        this.userRepository = userRepository;
     }
 
     @PostConstruct
@@ -39,36 +48,71 @@ public class PostService {
         }
     }
 
-    @Transactional(readOnly = true)
-    public List<Post> findAllPosts() {
-        return postRepository.findAllByOrderByCreatedAtDesc();
+    // Helper method to convert Post entity to PostDto
+    private PostDto convertToDto(Post post) {
+        UserDto userDto = null;
+        if (post.getUser() != null) {
+            // Ensure the user is loaded within the session before accessing it
+            // If the user is lazy-loaded, this will initialize the proxy
+            // Since this method is called within a @Transactional method (e.g., findAllPosts, findPostById),
+            // the session should be open.
+            User user = post.getUser();
+            userDto = new UserDto(user.getId(), user.getUsername());
+        }
+
+        return new PostDto(
+                post.getId(),
+                post.getTitle(),
+                post.getDescription(),
+                post.getImagePath(),
+                post.getHashtags(),
+                post.getCreatedAt(),
+                userDto
+        );
     }
 
     @Transactional(readOnly = true)
-    public Optional<Post> findPostById(Long id) {
-        return postRepository.findById(id);
+    public List<PostDto> findAllPosts() {
+        return postRepository.findAllByOrderByCreatedAtDesc().stream()
+                .map(this::convertToDto)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<PostDto> findPostById(Long id) {
+        return postRepository.findById(id)
+                .map(this::convertToDto);
     }
 
     @Transactional
-    public Post savePost(Post post, MultipartFile imageFile) throws IOException {
+    public PostDto savePost(Post post, MultipartFile imageFile, UserDetails userDetails) throws IOException {
+        User user = userRepository.findByUsername(userDetails.getUsername())
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+        post.setUser(user);
+
         String imagePath = saveImageFile(imageFile);
         post.setImagePath(imagePath);
-        return postRepository.save(post);
+        Post savedPost = postRepository.save(post);
+        return convertToDto(savedPost); // Return DTO
     }
 
     @Transactional
-    public Optional<Post> updatePost(Long id, Post postDetails, MultipartFile imageFile) throws IOException {
+    public Optional<PostDto> updatePost(Long id, Post postDetails, MultipartFile imageFile) throws IOException {
         return postRepository.findById(id)
                 .map(post -> {
+                    // Update fields from postDetails
                     post.setTitle(postDetails.getTitle());
                     post.setDescription(postDetails.getDescription());
                     post.setHashtags(postDetails.getHashtags());
 
+                    // Handle image file update
                     if (imageFile != null && !imageFile.isEmpty()) {
                         try {
                             String oldImagePath = post.getImagePath();
                             if (oldImagePath != null && !oldImagePath.isEmpty()) {
-                                Path oldImageFile = Paths.get(uploadDir, Paths.get(oldImagePath).getFileName().toString());
+                                // Extract file name from oldImagePath
+                                Path oldImageFileName = Paths.get(oldImagePath).getFileName();
+                                Path oldImageFile = Paths.get(uploadDir, oldImageFileName.toString());
                                 Files.deleteIfExists(oldImageFile);
                             }
                             
@@ -77,8 +121,23 @@ public class PostService {
                         } catch (IOException e) {
                             throw new RuntimeException("Failed to update image file", e);
                         }
+                    } else if (postDetails.getImagePath() == null || postDetails.getImagePath().isEmpty()) {
+                         // If no new image and client explicitly removed image, delete old one and set null
+                         String oldImagePath = post.getImagePath();
+                         if (oldImagePath != null && !oldImagePath.isEmpty()) {
+                             Path oldImageFileName = Paths.get(oldImagePath).getFileName();
+                             Path oldImageFile = Paths.get(uploadDir, oldImageFileName.toString());
+                             try {
+                                 Files.deleteIfExists(oldImageFile);
+                             } catch (IOException e) {
+                                 throw new RuntimeException("Failed to delete old image file", e);
+                             }
+                         }
+                         post.setImagePath(null);
                     }
-                    return postRepository.save(post);
+
+                    Post updatedPost = postRepository.save(post);
+                    return convertToDto(updatedPost); // Return DTO
                 });
     }
 
@@ -88,7 +147,9 @@ public class PostService {
             String imagePath = post.getImagePath();
             if (imagePath != null && !imagePath.isEmpty()) {
                 try {
-                    Path imageFile = Paths.get(uploadDir, Paths.get(imagePath).getFileName().toString());
+                    // Extract file name from imagePath
+                    Path imageFileName = Paths.get(imagePath).getFileName();
+                    Path imageFile = Paths.get(uploadDir, imageFileName.toString());
                     Files.deleteIfExists(imageFile);
                 } catch (IOException e) {
                     throw new RuntimeException("Failed to delete image file for post " + id, e);
@@ -104,7 +165,20 @@ public class PostService {
         }
 
         String originalFilename = imageFile.getOriginalFilename();
-        String fileExtension = originalFilename.substring(originalFilename.lastIndexOf("."));
+        
+        // --- Security Improvement: File Extension Validation ---
+        if (originalFilename == null) {
+            throw new IOException("File must have a name.");
+        }
+        
+        String fileExtension = originalFilename.substring(originalFilename.lastIndexOf(".")).toLowerCase();
+        List<String> allowedExtensions = List.of(".png", ".jpg", ".jpeg", ".gif", ".webp");
+
+        if (!allowedExtensions.contains(fileExtension)) {
+            throw new IOException("Invalid file type. Only " + allowedExtensions + " are allowed.");
+        }
+        // --- End Security Improvement ---
+
         String uniqueFileName = UUID.randomUUID().toString() + fileExtension;
         Path filePath = Paths.get(uploadDir, uniqueFileName);
 
@@ -114,7 +188,9 @@ public class PostService {
     }
 
     @Transactional(readOnly = true)
-    public List<Post> findPostsByTag(String hashtag) {
-        return postRepository.findByHashtagsContainingOrderByCreatedAtDesc(hashtag);
+    public List<PostDto> findPostsByTag(String hashtag) {
+        return postRepository.findByHashtagsContainingOrderByCreatedAtDesc(hashtag).stream()
+                .map(this::convertToDto)
+                .collect(Collectors.toList());
     }
 }

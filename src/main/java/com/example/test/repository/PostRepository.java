@@ -1,6 +1,6 @@
 package com.example.test.repository;
 
-import com.example.test.Post;
+import com.example.test.domain.Post;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
