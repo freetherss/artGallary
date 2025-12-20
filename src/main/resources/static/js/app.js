@@ -6,14 +6,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isLoginPage) {
         setupLoginForm();
     } else if (isSignupPage) {
-        setupSignupForm(); // This function will be added next
+        setupSignupForm();
     } else {
-        fetchPosts();
+        fetchPosts(); // Initial fetch for the first page
         setupModals();
-        setupCreatePostModal(); // Call the new function here
-        setupEditPostModal(); // Call for edit post modal setup
+        setupCreatePostModal();
+        setupEditPostModal();
+        setupPagination(); // Set up event listeners for pagination buttons
     }
 });
+
+let currentPage = 0;
+let totalPages = 1;
+let currentTag = '';
 
 function getToken() {
     return localStorage.getItem('jwt');
@@ -58,7 +63,7 @@ function handleLogout() {
 
 function setupLoginForm() {
     const loginForm = document.getElementById('login-form');
-    if (!loginForm) return; // Ensure form exists
+    if (!loginForm) return;
 
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -69,14 +74,11 @@ function setupLoginForm() {
         try {
             const response = await fetch('/api/auth/signin', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password }),
             });
 
             if (!response.ok) {
-                // Attempt to parse error message from backend if available
                 const errorData = await response.json().catch(() => ({ message: 'Login failed!' }));
                 throw new Error(errorData.message || 'Login failed!');
             }
@@ -94,7 +96,7 @@ function setupLoginForm() {
 
 function setupSignupForm() {
     const signupForm = document.getElementById('signup-form');
-    if (!signupForm) return; // Ensure form exists
+    if (!signupForm) return;
 
     signupForm.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -110,11 +112,9 @@ function setupSignupForm() {
         }
 
         try {
-            const response = await fetch('/api/auth/signup', { // Assuming /api/auth/signup is the endpoint
+            const response = await fetch('/api/auth/signup', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, email, password }),
             });
 
@@ -123,7 +123,6 @@ function setupSignupForm() {
                 throw new Error(errorData.message || 'Sign up failed!');
             }
 
-            // On successful signup, redirect to login page
             window.location.href = '/login.html?signupSuccess=true';
 
         } catch (error) {
@@ -134,17 +133,15 @@ function setupSignupForm() {
 }
 
 function setupModals() {
-    const postFormModal = document.getElementById('postFormModal'); // Correct ID for the modal
-    const closeButtons = document.querySelectorAll('.modal .close-button'); // General close buttons
+    const postFormModal = document.getElementById('postFormModal');
+    const closeButtons = document.querySelectorAll('.modal .close-button');
 
-    // Event listeners for general close buttons
     closeButtons.forEach(button => {
         button.addEventListener('click', () => {
             button.closest('.modal').style.display = 'none';
         });
     });
 
-    // Close modal when clicking outside of it
     if (postFormModal) {
         window.addEventListener('click', (event) => {
             if (event.target === postFormModal) {
@@ -152,14 +149,15 @@ function setupModals() {
             }
         });
     }
-    // Note: newPostLinkElement listener is already defined globally.
-    // openEditPostModal is called from renderPostDetailModal.
 }
 
-
-async function fetchPosts(tag = '') {
+async function fetchPosts(page = 0, tag = '') {
     try {
-        const url = tag ? `/api/posts?tag=${tag}` : '/api/posts';
+        currentTag = tag; // Store the current tag for pagination
+        const url = tag 
+            ? `/api/posts?tag=${tag}&page=${page}&size=9` 
+            : `/api/posts?page=${page}&size=9`;
+        
         const headers = {};
         const token = getToken();
         if (token) {
@@ -170,8 +168,9 @@ async function fetchPosts(tag = '') {
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
-        const posts = await response.json();
-        displayPosts(posts);
+        const pageData = await response.json();
+        displayPosts(pageData.content);
+        updatePaginationControls(pageData);
     } catch (error) {
         console.error('Error fetching posts:', error);
         document.querySelector('.posts-grid').innerHTML = '<p>Failed to load posts. Please try again later.</p>';
@@ -180,9 +179,9 @@ async function fetchPosts(tag = '') {
 
 function displayPosts(posts) {
     const postsGrid = document.querySelector('.posts-grid');
-    postsGrid.innerHTML = ''; // Clear existing content
+    postsGrid.innerHTML = '';
 
-    if (posts.length === 0) {
+    if (!posts || posts.length === 0) {
         postsGrid.innerHTML = '<p>No posts found.</p>';
         return;
     }
@@ -190,7 +189,7 @@ function displayPosts(posts) {
     posts.forEach(post => {
         const postItem = document.createElement('div');
         postItem.className = 'post-item';
-        postItem.dataset.postId = post.id; // Store post ID
+        postItem.dataset.postId = post.id;
         postItem.innerHTML = `
             <img src="${post.imagePath}" alt="${post.description}">
             <h3>${post.description}</h3>
@@ -199,7 +198,6 @@ function displayPosts(posts) {
         postsGrid.appendChild(postItem);
     });
 
-    // Add event listener for post clicks to show detail
     postsGrid.querySelectorAll('.post-item').forEach(item => {
         item.addEventListener('click', (event) => {
             const postId = event.currentTarget.dataset.postId;
@@ -207,15 +205,57 @@ function displayPosts(posts) {
         });
     });
 
-    // Add event listener for hashtag clicks
     postsGrid.querySelectorAll('.hashtag').forEach(hashtagSpan => {
         hashtagSpan.addEventListener('click', (event) => {
-            event.stopPropagation(); // Prevent post-item click event
+            event.stopPropagation();
             const tag = event.currentTarget.dataset.tag;
-            fetchPosts(tag); // Filter by tag
+            fetchPosts(0, tag); // Reset to first page when filtering by new tag
         });
     });
 }
+
+function setupPagination() {
+    const prevButton = document.getElementById('prev-page');
+    const nextButton = document.getElementById('next-page');
+
+    if (prevButton) {
+        prevButton.addEventListener('click', () => {
+            if (currentPage > 0) {
+                fetchPosts(currentPage - 1, currentTag);
+            }
+        });
+    }
+
+    if (nextButton) {
+        nextButton.addEventListener('click', () => {
+            if (currentPage < totalPages - 1) {
+                fetchPosts(currentPage + 1, currentTag);
+            }
+        });
+    }
+}
+
+function updatePaginationControls(pageData) {
+    const prevButton = document.getElementById('prev-page');
+    const nextButton = document.getElementById('next-page');
+    const pageInfo = document.getElementById('page-info');
+
+    currentPage = pageData.number;
+    totalPages = pageData.totalPages;
+
+    if (pageInfo) {
+        pageInfo.textContent = `Page ${currentPage + 1} of ${totalPages}`;
+    }
+
+    if (prevButton) {
+        prevButton.disabled = pageData.first;
+    }
+    
+    if (nextButton) {
+        nextButton.disabled = pageData.last;
+    }
+}
+
 
 async function showPostDetail(id) {
     try {
@@ -266,11 +306,11 @@ function renderPostDetailModal(post) {
     const token = getToken();
     if (token) {
         const decodedToken = parseJwt(token);
-        const currentUser = decodedToken.sub; // 'sub' typically holds the username
-        const roles = decodedToken.roles || []; // Assuming roles are in the token
+        const currentUser = decodedToken.sub;
+        const roles = decodedToken.roles || [];
 
         const isOwner = post.user && post.user.username === currentUser;
-        const isAdmin = roles.includes('ROLE_ADMIN'); // Assuming 'ROLE_ADMIN' for admin role
+        const isAdmin = roles.includes('ROLE_ADMIN');
 
         if (isOwner || isAdmin) {
             const editButton = document.getElementById('edit-post-btn');
@@ -279,7 +319,6 @@ function renderPostDetailModal(post) {
             if (deleteButton) deleteButton.style.display = 'inline-block';
         }
     }
-
 
     modal.querySelector('.close-button').addEventListener('click', () => {
         modal.style.display = 'none';
@@ -291,13 +330,11 @@ function renderPostDetailModal(post) {
         }
     });
 
-    // Event listeners for edit and delete buttons
     const editButton = document.getElementById('edit-post-btn');
     if (editButton) {
         editButton.addEventListener('click', () => {
-            // Placeholder for edit functionality - open post form modal with current post data
-            closePostDetailModal(); 
-            openPostFormModal(post); // Use openPostFormModal for editing
+            closePostDetailModal();
+            openPostFormModal(post);
         });
     }
 
@@ -320,9 +357,7 @@ async function deletePost(id) {
         }
         const response = await fetch(`/api/posts/${id}`, {
             method: 'DELETE',
-            headers: {
-                'Authorization': `Bearer ${token}`
-            }
+            headers: { 'Authorization': `Bearer ${token}` }
         });
 
         if (!response.ok) {
@@ -330,8 +365,8 @@ async function deletePost(id) {
             throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
         }
 
-        closePostDetailModal(); // Close the detail modal after deletion
-        fetchPosts(); // Refresh the gallery
+        closePostDetailModal();
+        fetchPosts(0, currentTag); // Refresh to the first page of the current view
         alert('Post deleted successfully!');
     } catch (error) {
         console.error('Error deleting post:', error);
@@ -346,32 +381,27 @@ function closePostDetailModal() {
     }
 }
 
-
-// --- Create Post Modal Logic ---
 function setupCreatePostModal() {
-    const newPostLinkElement = document.getElementById('new-post-link'); // Correctly target the nav link
-    const createPostModal = document.getElementById('postFormModal'); // Assuming postFormModal is the correct ID for the create/edit modal
-    console.log('setupCreatePostModal: newPostLinkElement', newPostLinkElement);
-    console.log('setupCreatePostModal: createPostModal', createPostModal);
+    const newPostLinkElement = document.getElementById('new-post-link');
+    const createPostModal = document.getElementById('postFormModal');
 
     if (!createPostModal) {
         console.error('setupCreatePostModal: postFormModal not found!');
         return;
     }
-    const createPostModalCloseBtn = createPostModal.querySelector('.close-button');
-    const createPostForm = document.getElementById('postForm'); // Assuming postForm is the correct ID for the form
+    const createPostForm = document.getElementById('postForm');
 
     if (newPostLinkElement) {
-        newPostLinkElement.querySelector('a').addEventListener('click', (e) => { // Attach to <a> tag within <li>
-            e.preventDefault(); // Prevent default link behavior
-            openPostFormModal(); // Open the general post form modal
+        newPostLinkElement.querySelector('a').addEventListener('click', (e) => {
+            e.preventDefault();
+            openPostFormModal();
         });
     }
 
-    if (createPostForm) { // This refers to postForm
+    if (createPostForm) {
         createPostForm.addEventListener('submit', async (event) => {
             event.preventDefault();
-            const postId = document.getElementById('postId').value; // Get postId from the hidden input
+            const postId = document.getElementById('postId').value;
 
             const postData = {
                 title: document.getElementById('postTitle').value,
@@ -383,15 +413,12 @@ function setupCreatePostModal() {
             const removeImage = document.getElementById('removeImageCheckbox') ? document.getElementById('removeImageCheckbox').checked : false;
             const currentImagePath = document.getElementById('currentImagePathInput').value;
 
-            // Handle image path logic for update
-            if (postId) { // Only apply this logic if it's an update (postId exists)
+            if (postId) {
                 if (removeImage) {
-                    postData.imagePath = null; // Explicitly set to null to remove image
+                    postData.imagePath = null;
                 } else if (!imageFile && currentImagePath) {
-                    postData.imagePath = currentImagePath; // Keep existing image if no new file and not removed
+                    postData.imagePath = currentImagePath;
                 }
-                // If a new imageFile is provided, the backend will handle it, and imagePath in postData isn't strictly needed here.
-                // If no new imageFile, no currentImagePath and not removing, then imagePath remains null/undefined (correct for new posts or no image).
             }
 
             const formData = new FormData();
@@ -405,28 +432,29 @@ function setupCreatePostModal() {
             } else {
                 await createPost(formData);
             }
-            createPostModal.style.display = 'none'; // Hide the modal after submit
-            fetchPosts(); // Refresh posts
+            createPostModal.style.display = 'none';
+            fetchPosts(0, currentTag); // Refresh to the first page
         });
     }
 }
 
-function openPostFormModal(post = null) { // This is the function called for both create and edit
+function openPostFormModal(post = null) {
     const postFormModal = document.getElementById('postFormModal');
     const postForm = document.getElementById('postForm');
-    postForm.reset(); // Clear previous data
-    document.getElementById('currentImage').textContent = ''; // Clear current image display
+    postForm.reset();
+    const currentImageDiv = document.getElementById('currentImage');
+    if(currentImageDiv) currentImageDiv.innerHTML = '';
 
     if (post) {
         document.getElementById('postId').value = post.id;
         document.getElementById('postTitle').value = post.title;
-        document.getElementById('postDescription').value = post.content;
+        document.getElementById('postDescription').value = post.description; // Corrected from post.content
         document.getElementById('postHashtags').value = post.hashtags;
-        document.getElementById('currentImagePathInput').value = post.imagePath || ''; // Populate the hidden input
+        document.getElementById('currentImagePathInput').value = post.imagePath || '';
 
         postFormModal.querySelector('h2').textContent = '게시물 수정';
-        if (post.imagePath) {
-            document.getElementById('currentImage').innerHTML = `
+        if (post.imagePath && currentImageDiv) {
+            currentImageDiv.innerHTML = `
                 <p>현재 이미지:</p>
                 <img src="${post.imagePath}" alt="Current Post Image" style="max-width: 100px; height: auto; display: block; margin-top: 5px;">
                 <label><input type="checkbox" id="removeImageCheckbox"> 이미지 삭제</label>
@@ -446,12 +474,9 @@ async function createPost(formData) {
             alert('You must be logged in to create a post.');
             return;
         }
-
         const response = await fetch('/api/posts', {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`
-            },
+            headers: { 'Authorization': `Bearer ${token}` },
             body: formData
         });
         if (!response.ok) {
@@ -474,9 +499,7 @@ async function updatePost(id, formData) {
         }
         const response = await fetch(`/api/posts/${id}`, {
             method: 'PUT',
-            headers: {
-                'Authorization': `Bearer ${token}`
-            },
+            headers: { 'Authorization': `Bearer ${token}` },
             body: formData
         });
         if (!response.ok) {
@@ -490,94 +513,13 @@ async function updatePost(id, formData) {
     }
 }
 
-// --- Edit Post Modal Logic ---
-// This entire section was for a separate editPostModal, but we're now using openPostFormModal
-// for both create and edit. So this can be largely removed or commented out.
-// For now, I'll ensure it doesn't cause errors by only calling setupEditPostModal if it's explicitly needed.
+// This function is effectively deprecated as its logic is merged into setupCreatePostModal and openPostFormModal
 function setupEditPostModal() {
-    const editPostModal = document.getElementById('editPostModal');
-    if (!editPostModal) return; // Ensure editPostModal exists
-
-    const editPostModalCloseBtn = editPostModal.querySelector('.close-button');
-    const editPostForm = document.getElementById('editPostForm');
-    // ... other elements
-
-    if (editPostModalCloseBtn) {
-        editPostModalCloseBtn.addEventListener('click', () => {
-            closeEditPostModal();
-        });
-    }
-
-    if (editPostModal) {
-        window.addEventListener('click', (event) => {
-            if (event.target === editPostModal) {
-                closeEditPostModal();
-            }
-        });
-    }
-
-    if (editPostForm) {
-        editPostForm.addEventListener('submit', async (event) => {
-            event.preventDefault();
-
-            const postId = document.getElementById('editPostId').value;
-            const formData = new FormData(editPostForm);
-
-            const description = formData.get('description');
-            const hashtags = formData.get('hashtags');
-            const imageFile = formData.get('imageFile');
-
-            const postFormData = new FormData();
-            
-            const postDto = {
-                description: description,
-                hashtags: hashtags
-            };
-
-            // If no new image file is provided, include the existing imagePath in the DTO
-            if (!imageFile || imageFile.size === 0) {
-                postDto.imagePath = document.getElementById('currentImagePath').value;
-            }
-
-            postFormData.append('post', new Blob([JSON.stringify(postDto)], { type: 'application/json' }));
-
-            if (imageFile && imageFile.size > 0) {
-                postFormData.append('imageFile', imageFile);
-            }
-
-            try {
-                const token = getToken();
-                if (!token) {
-                    alert('You must be logged in to update a post.');
-                    return;
-                }
-
-                const response = await fetch(`/api/posts/${postId}`, {
-                    method: 'PUT',
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    },
-                    body: postFormData
-                });
-
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
-                }
-
-                closeEditPostModal();
-                editPostForm.reset();
-                fetchPosts(); // Refresh the gallery
-            } catch (error) {
-                console.error('Error updating post:', error);
-                alert('Failed to update post: ' + error.message);
-            }
-        });
-    }
+    // Left empty intentionally, as its functionality is now part of the main post form modal
 }
 
-
 function closeEditPostModal() {
+    // This is also deprecated
     const modal = document.getElementById('editPostModal');
     if (modal) {
         modal.style.display = 'none';

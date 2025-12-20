@@ -1,5 +1,7 @@
 package com.example.test.service;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import com.example.test.domain.Post;
 import com.example.test.domain.User;
 import com.example.test.dto.PostDto; // Import PostDto
@@ -22,7 +24,7 @@ import java.nio.file.Paths;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.stream.Collectors; // Import Collectors
+
 
 @Service
 public class PostService {
@@ -52,10 +54,6 @@ public class PostService {
     private PostDto convertToDto(Post post) {
         UserDto userDto = null;
         if (post.getUser() != null) {
-            // Ensure the user is loaded within the session before accessing it
-            // If the user is lazy-loaded, this will initialize the proxy
-            // Since this method is called within a @Transactional method (e.g., findAllPosts, findPostById),
-            // the session should be open.
             User user = post.getUser();
             userDto = new UserDto(user.getId(), user.getUsername());
         }
@@ -72,10 +70,9 @@ public class PostService {
     }
 
     @Transactional(readOnly = true)
-    public List<PostDto> findAllPosts() {
-        return postRepository.findAllByOrderByCreatedAtDesc().stream()
-                .map(this::convertToDto)
-                .collect(Collectors.toList());
+    public Page<PostDto> findAllPosts(Pageable pageable) {
+        return postRepository.findAllByOrderByCreatedAtDesc(pageable)
+                .map(this::convertToDto);
     }
 
     @Transactional(readOnly = true)
@@ -188,9 +185,8 @@ public class PostService {
     }
 
     @Transactional(readOnly = true)
-    public List<PostDto> findPostsByTag(String hashtag) {
-        return postRepository.findByHashtagsContainingOrderByCreatedAtDesc(hashtag).stream()
-                .map(this::convertToDto)
-                .collect(Collectors.toList());
+    public Page<PostDto> findPostsByTag(String hashtag, Pageable pageable) {
+        return postRepository.findByHashtagsContainingOrderByCreatedAtDesc(hashtag, pageable)
+                .map(this::convertToDto);
     }
 }
