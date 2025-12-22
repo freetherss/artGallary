@@ -179,7 +179,9 @@ public class PostService {
         String uniqueFileName = UUID.randomUUID().toString() + fileExtension;
         Path filePath = Paths.get(uploadDir, uniqueFileName);
 
-        Files.copy(imageFile.getInputStream(), filePath);
+        try (var inputStream = imageFile.getInputStream()) {
+            Files.copy(inputStream, filePath);
+        }
 
         return "/uploads/" + uniqueFileName;
     }

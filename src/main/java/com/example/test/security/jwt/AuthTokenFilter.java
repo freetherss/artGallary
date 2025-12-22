@@ -51,16 +51,16 @@ public class AuthTokenFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) throws ServletException {
         String path = request.getRequestURI();
-        // REMOVED THE SPECIFIC '/api/posts' BYPASS.
-        // Now, /api/posts requests will pass through doFilterInternal
         
-        boolean match = PUBLIC_URL_PATTERNS.stream().anyMatch(pattern -> pathMatcher.match(pattern, path));
-        if (match) {
-            logger.info("AuthTokenFilter: Bypassing filter for path: " + path + " (matched by pattern)");
-        } else {
-            logger.info("AuthTokenFilter: Applying filter for path: " + path);
+        for (String pattern : PUBLIC_URL_PATTERNS) {
+            if (pathMatcher.match(pattern, path)) {
+                logger.info("AuthTokenFilter: Bypassing filter for path: " + path + " (matched by pattern: " + pattern + ")");
+                return true; // Bypass the filter
+            }
         }
-        return match;
+        
+        logger.info("AuthTokenFilter: Applying filter for path: " + path);
+        return false; // Apply the filter
     }
 
     @Override

@@ -1,5 +1,6 @@
 package com.example.test.controller;
 
+import com.example.test.dto.CustomPageDto;
 import org.springframework.data.domain.Page;
 
 import org.springframework.data.domain.Pageable;
@@ -108,19 +109,71 @@ public class PostController {
 
 
 
-    @GetMapping
+        @GetMapping
 
-    public Page<PostDto> getAllPosts(@RequestParam(required = false) String tag, Pageable pageable) {
 
-        if (tag != null && !tag.isEmpty()) {
 
-            return postService.findPostsByTag(tag, pageable);
+        public CustomPageDto<PostDto> getAllPosts(@RequestParam(required = false) String tag, Pageable pageable) {
+
+
+
+            Page<PostDto> pageResult;
+
+
+
+            if (tag != null && !tag.isEmpty()) {
+
+
+
+                pageResult = postService.findPostsByTag(tag, pageable);
+
+
+
+            } else {
+
+
+
+                pageResult = postService.findAllPosts(pageable);
+
+
+
+            }
+
+
+
+            
+
+
+
+            return new CustomPageDto<>(
+
+
+
+                pageResult.getContent(),
+
+
+
+                pageResult.getTotalPages(),
+
+
+
+                pageResult.getNumber(),
+
+
+
+                pageResult.isFirst(),
+
+
+
+                pageResult.isLast()
+
+
+
+            );
+
+
 
         }
-
-        return postService.findAllPosts(pageable);
-
-    }
 
 
 
