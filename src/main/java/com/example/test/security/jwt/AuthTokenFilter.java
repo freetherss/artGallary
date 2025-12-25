@@ -6,6 +6,8 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,13 +15,10 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
-import org.springframework.util.StringUtils;
-import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.util.AntPathMatcher;
 import org.springframework.util.PathMatcher;
-
-import java.util.Arrays;
-import java.util.List;
+import org.springframework.util.StringUtils;
+import org.springframework.web.filter.OncePerRequestFilter;
 
 public class AuthTokenFilter extends OncePerRequestFilter {
     @Autowired
@@ -30,42 +29,41 @@ public class AuthTokenFilter extends OncePerRequestFilter {
 
     private static final Logger logger = LoggerFactory.getLogger(AuthTokenFilter.class);
 
-    private PathMatcher pathMatcher = new AntPathMatcher();
+    private final PathMatcher pathMatcher = new AntPathMatcher();
 
-    // List of URL patterns that should not be filtered by this JWT filter.
-    // These should correspond to paths that are permitAll() in SecurityConfig
-    // AND should NOT attempt JWT validation regardless of method (e.g., static resources).
-    private static final List<String> PUBLIC_URL_PATTERNS = Arrays.asList(
-        "/api/auth/**",       // Covers signin and signup
-        "/uploads/**",        // for serving images
-        "/css/**",            // static css
-        "/js/**",             // static js
-        "/",                // homepage
-        "/index.html",
-        "/login.html",
-        "/signup.html",
-        "/favicon.ico",       // Added favicon
-        "/error"              // Added error page
+    // List of URL patterns that should be bypassed by this filter.
+    private static final List<String> BYPASS_URL_PATTERNS = Arrays.asList(
+            "/api/auth/**"
+            // Note: GET on /api/posts is handled by shouldNotFilter's logic
     );
 
     @Override
-    protected boolean shouldNotFilter(HttpServletRequest request) throws ServletException {
+    protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
-        
-        for (String pattern : PUBLIC_URL_PATTERNS) {
-            if (pathMatcher.match(pattern, path)) {
-                logger.info("AuthTokenFilter: Bypassing filter for path: " + path + " (matched by pattern: " + pattern + ")");
-                return true; // Bypass the filter
-            }
+
+        // Bypass all GET requests to /api/posts or /api/posts/*
+        if (request.getMethod().equalsIgnoreCase("GET") && pathMatcher.match("/api/posts/**", path)) {
+            logger.debug("AuthTokenFilter: Bypassing filter for public GET request on path: {}", path);
+            return true;
         }
         
-        logger.info("AuthTokenFilter: Applying filter for path: " + path);
-        return false; // Apply the filter
+        // Bypass specific API patterns like /api/auth/**
+        for (String pattern : BYPASS_URL_PATTERNS) {
+            if (pathMatcher.match(pattern, path)) {
+                logger.debug("AuthTokenFilter: Bypassing filter for configured bypass pattern on path: {}", path);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
+        
+        logger.debug("AuthTokenFilter: Applying filter for path: {}", request.getRequestURI());
+
         try {
             String jwt = parseJwt(request);
             if (jwt != null && jwtUtils.validateJwtToken(jwt)) {
@@ -80,16 +78,9 @@ public class AuthTokenFilter extends OncePerRequestFilter {
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
                 SecurityContextHolder.getContext().setAuthentication(authentication);
-            } else {
-                // ADDED MORE SPECIFIC LOGGING HERE
-                if (jwt == null) {
-                    logger.info("AuthTokenFilter: No JWT token found in request for path: {}", request.getRequestURI());
-                } else {
-                    logger.warn("AuthTokenFilter: JWT token validation failed for path: {}", request.getRequestURI());
-                }
             }
         } catch (Exception e) {
-            logger.error("AuthTokenFilter: Cannot set user authentication for path {}: {}", request.getRequestURI(), e.getMessage(), e);
+            logger.error("AuthTokenFilter: Cannot set user authentication: {}", e.getMessage());
         }
 
         filterChain.doFilter(request, response);

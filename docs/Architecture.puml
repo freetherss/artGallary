@@ -1,0 +1,86 @@
+@startuml
+' skinparam을 사용하여 다이어그램의 모양을 좀 더 현대적으로 변경합니다.
+skinparam classAttributeIconSize 0
+skinparam style strictuml
+skinparam handwritten false
+skinparam roundcorner 20
+skinparam monochrome false
+skinparam shadowing true
+
+title JIW Gallery Application Architecture
+
+package "Controller" {
+    class PostController
+    class AuthController
+}
+
+package "Service" {
+    class PostService
+    class UserDetailsServiceImpl
+}
+
+package "Repository" {
+    interface PostRepository
+    interface UserRepository
+    interface RoleRepository
+}
+
+package "Domain" {
+    entity Post {
+        - Long id
+        - String title
+        - String description
+        - String imagePath
+        - LocalDateTime createdAt
+    }
+    entity User {
+        - Long id
+        - String username
+        - String password
+    }
+    entity Role {
+        - Integer id
+        - ERole name
+    }
+}
+
+package "DTO" {
+    class CustomPageDto
+    class PostDto
+}
+
+package "Security" {
+    class AuthTokenFilter
+    class JwtUtils
+    class SecurityConfig
+}
+
+' --- 관계 정의 ---
+
+' Controller -> Service
+PostController --> PostService
+
+' Service -> Repository
+PostService --> PostRepository
+PostService --> UserRepository
+UserDetailsServiceImpl --> UserRepository
+
+' Controller -> DTO (Return types)
+PostController ..> PostDto
+PostController ..> CustomPageDto
+
+' Service -> DTO (Return types)
+PostService ..> PostDto
+
+' Domain (Entity) Relationships
+User "1" -- "0..*" Post : "manages"
+User "1..*" -- "1..*" Role : "has"
+
+' Security Relationships
+SecurityConfig --> AuthTokenFilter
+SecurityConfig --> UserDetailsServiceImpl
+AuthTokenFilter --> JwtUtils
+AuthTokenFilter --> UserDetailsServiceImpl
+
+
+@enduml
